@@ -1,5 +1,14 @@
 import re
 import requests
+import queue
+
+
+from threading import Thread
+
+
+pages_queue = queue.Queue()
+data_queue = queue.Queue()
+
 
 def extract_product_data(htmlpage):
     """ data scraper """
@@ -33,13 +42,21 @@ def extract_product_data(htmlpage):
 
     return data
 
-def getpage(url):
-    """ get html page from url """
-    r = requests.get(url)
+
+def download_page(url):
+    """ download html page from url """
+    r = requests.get(url, timeout=30)
     return r.text
 
-def extract_product_url(htmlpage):
-    """ extract product urls """
+
+def download_page_add_to_queue(url):
+    """ download html page from url and add it to a global queue """
+    r = requests.get(url, timeout=30)
+    pages_queue.put_nowait(r.text)
+
+
+def extract_urls_from_page(htmlpage):
+    """ extract urls of products from html page """
     result = re.findall('<a class="media-link" href=.*">', htmlpage)
     urls = []
     for x in result:
@@ -47,13 +64,53 @@ def extract_product_url(htmlpage):
         urls.append(url)
     return urls
 
+
+def extract_product_data_get_from_queue():
+    """ read a page from the pages queue, extract data and add it to data queue """
+    while True:
+        try:
+            page = pages_queue.get(timeout=30)
+            data_queue.put_nowait(extract_product_data(page))
+        except queue.Empty:
+            break
+
+
 def print_products_on_page(url):
-    page = getpage(url)
-    product_list = extract_product_url(page)
-    pages = map(getpage, product_list)
+    """ sequentially download html pages and extract data from them """
+    page = download_page(url)
+    urls = extract_urls_from_page(page)
+    pages = map(download_page, urls)
     result = map(extract_product_data, pages)
     print(list(result))
 
-print_products_on_page('https://www.bemag.ro/bauturi/champagne-spumante/')
-print_products_on_page('https://www.bemag.ro/bauturi/single-malt-scotch-whisky')
+
+def parallel_print_products_on_page(url, num_extractor_threads=4):
+    """ threaded download and extraction of product data  """
+    page = download_page(url)
+    urls = extract_urls_from_page(page)
+
+    download_threads = []
+    for addr in urls:
+        th = Thread(target=download_page_add_to_queue, args=(addr,))
+        download_threads.append(th)
+        th.start()
+
+    extractor_threads = []
+    for _ in range(num_extractor_threads):
+        th = Thread(target=extract_product_data_get_from_queue)
+        extractor_threads.append(th)
+        th.start()
+
+    try:
+        while True:
+            item = data_queue.get(timeout=15)
+            print(item)
+    except queue.Empty:
+        pass
+
+
+if __name__ == '__main__':
+    #print_products_on_page('https://www.bemag.ro/bauturi/champagne-spumante/')
+    #print_products_on_page('https://www.bemag.ro/bauturi/single-malt-scotch-whisky')
+    parallel_print_products_on_page('https://www.bemag.ro/bauturi/champagne-spumante/')
 
