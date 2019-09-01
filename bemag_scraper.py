@@ -1,6 +1,7 @@
 import re
 import requests
 import queue
+import sqlite3
 
 
 from threading import Thread
@@ -109,8 +110,45 @@ def parallel_print_products_on_page(url, num_extractor_threads=4):
         pass
 
 
+def parallel_add_products_to_db(url, num_extractor_threads=4):
+    """ threaded download and extraction of product data into a sqlite db """
+    page = download_page(url)
+    urls = extract_urls_from_page(page)
+
+    download_threads = []
+    for addr in urls:
+        th = Thread(target=download_page_add_to_queue, args=(addr,))
+        download_threads.append(th)
+        th.start()
+
+    extractor_threads = []
+    for _ in range(num_extractor_threads):
+        th = Thread(target=extract_product_data_get_from_queue)
+        extractor_threads.append(th)
+        th.start()
+
+    conn: sqlite3.Connection = sqlite3.connect('bemagproducts.db')
+    c = conn.cursor()
+    c.execute("PRAGMA synchronous = OFF")
+    c.execute("PRAGMA journal_mode = MEMORY")
+    c.execute('''CREATE TABLE IF NOT EXISTS products (name text, price text, category text, url text)''')
+    
+    try:
+        while True:
+            item = data_queue.get(timeout=15)
+            sql = ''' INSERT INTO products(name,price,category,url) VALUES(?,?,?,?) '''
+            values = (item['product_name'], item['product_price'], item['product_category'], item['product_url'])
+            c.execute(sql, values)
+    except queue.Empty:
+        conn.commit()
+        conn.close()
+
+
 if __name__ == '__main__':
     #print_products_on_page('https://www.bemag.ro/bauturi/champagne-spumante/')
     #print_products_on_page('https://www.bemag.ro/bauturi/single-malt-scotch-whisky')
-    parallel_print_products_on_page('https://www.bemag.ro/bauturi/champagne-spumante/')
+    #parallel_print_products_on_page('https://www.bemag.ro/bauturi/champagne-spumante/')
+    #parallel_add_products_to_db('https://www.bemag.ro/bauturi/champagne-spumante/')
+    #parallel_add_products_to_db('https://www.bemag.ro/bauturi/single-malt-scotch-whisky')
+    parallel_add_products_to_db('https://www.bemag.ro/bauturi/vodka')
 
