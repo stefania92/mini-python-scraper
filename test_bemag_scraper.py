@@ -15,8 +15,9 @@ class BemagScraperTestCase(unittest.TestCase):
         self.assertIn('https://www.bemag.ro/produse/champagne-spumante/alira-champagne-075l', result)
 
     def test_parallel_add_products_to_db(self):
-        bemag_scraper.parallel_add_products_to_db('https://www.bemag.ro/bauturi/gin')
-        conn: sqlite3.Connection = sqlite3.connect('bemagproducts.db')
+        cursor = bemag_scraper.connect_to_db('bemagproducts.db')
+        bemag_scraper.parallel_add_products_to_db('https://www.bemag.ro/bauturi/gin', cursor)
+        conn = sqlite3.connect('bemagproducts.db')
         c = conn.cursor()
         c.execute('SELECT * FROM products WHERE category="Gin"')
         result = c.fetchone()
